@@ -5,6 +5,7 @@ mod discord;
 mod olx;
 mod state;
 
+use std::collections::HashSet;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -44,10 +45,7 @@ pub fn run() -> Result<()> {
                     continue;
                 }
             };
-            let new: Vec<&olx::Listing> = listings
-                .iter()
-                .filter(|listing| !seen.contains(&listing.url))
-                .collect();
+            let new = new_listings(&listings, &seen);
             println!("    Found {} listings, {} new", listings.len(), new.len());
 
             for listing in new {
@@ -81,4 +79,45 @@ pub fn run() -> Result<()> {
 
 fn is_true(value: &str) -> bool {
     !value.is_empty() && !value.eq_ignore_ascii_case("0") && !value.eq_ignore_ascii_case("false")
+}
+
+/// Listings that are neither already seen nor repeated within the same page.
+fn new_listings<'a>(listings: &'a [olx::Listing], seen: &HashSet<String>) -> Vec<&'a olx::Listing> {
+    let mut page_urls = HashSet::new();
+    let mut new = Vec::new();
+    for listing in listings {
+        if !seen.contains(&listing.url) && page_urls.insert(listing.url.as_str()) {
+            new.push(listing);
+        }
+    }
+    new
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn listing(url: &str) -> olx::Listing {
+        olx::Listing {
+            title: url.to_owned(),
+            url: url.to_owned(),
+            price: String::new(),
+            location: String::new(),
+            date: String::new(),
+            image_url: None,
+        }
+    }
+
+    #[test]
+    fn skips_seen_and_in_page_duplicates() {
+        let listings = vec![listing("a"), listing("b"), listing("a"), listing("c")];
+        let seen = HashSet::from(["b".to_owned()]);
+
+        let urls: Vec<&str> = new_listings(&listings, &seen)
+            .into_iter()
+            .map(|listing| listing.url.as_str())
+            .collect();
+
+        assert_eq!(urls, ["a", "c"]);
+    }
 }
