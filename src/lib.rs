@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Error, Result};
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 const POST_DELAY: Duration = Duration::from_secs(2);
@@ -35,11 +35,12 @@ pub fn run() -> Result<()> {
     }
 
     let mut total_new = 0;
+    let mut first_error: Option<Error> = None;
 
     for group in &groups {
         println!("\nProcessing group with {} search URLs", group.urls.len());
 
-        for url in &group.urls {
+        'urls: for url in &group.urls {
             println!("  Scraping: {url}");
             let listings = match olx::fetch(&agent, url) {
                 Ok(listings) => listings,
@@ -57,9 +58,9 @@ pub fn run() -> Result<()> {
                 } else {
                     println!("    Sending: {}", listing.title);
                     if let Err(error) = discord::send(&agent, &group.webhook, listing) {
-                        state::save(&state_dir, &seen)
-                            .context("saving state after a failed Discord send")?;
-                        return Err(error);
+                        eprintln!("Error sending {}: {error:#}", listing.title);
+                        first_error.get_or_insert(error);
+                        break 'urls;
                     }
                     thread::sleep(POST_DELAY);
                 }
@@ -69,6 +70,10 @@ pub fn run() -> Result<()> {
         }
 
         state::save(&state_dir, &seen)?;
+    }
+
+    if let Some(error) = first_error {
+        return Err(error.context(format!("after sending {total_new} new listings")));
     }
 
     let action = if seed_only {

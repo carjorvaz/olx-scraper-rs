@@ -37,7 +37,13 @@ pub fn parse(html: &str) -> Vec<Listing> {
         println!("    (only suggested listings, skipping)");
         return Vec::new();
     }
-    extract(&doc)
+    let listings = extract(&doc);
+    if listings.is_empty() {
+        eprintln!(
+            "Warning: the page reported results but no listing cards were parsed; the selectors may have changed"
+        );
+    }
+    listings
 }
 
 fn extract(doc: &Html) -> Vec<Listing> {

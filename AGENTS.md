@@ -34,7 +34,10 @@ a server and has no UI.
 - The state is written atomically (temp file, fsync, rename) after every group. Never
   write `seen-urls.txt` in place.
 - A listing is marked seen only after its Discord POST succeeds, so a failed run retries
-  it; a scrape error for one search URL does not abort the rest.
+  it; a scrape error for one search URL does not abort the rest, and a failed webhook
+  stops only its own group (the run exits non-zero).
+- Discord payloads are clipped to Discord's limits; one oversized listing must not block
+  the run.
 - One notification per URL per run, even when the same ad appears twice on a page.
 - `SEED_ONLY=1` records listings without posting.
 - No async runtime, no web framework, no database, no CLI parser. Four runtime deps.

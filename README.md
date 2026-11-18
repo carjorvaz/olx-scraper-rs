@@ -75,7 +75,8 @@ https://www.olx.pt/imoveis/?search[order]=created_at:desc
 
 Small on purpose: blocking HTTP, no async runtime, a plain-text seen set, environment
 variables, and four runtime dependencies. The state file is written atomically after
-every group, and a listing is only marked seen after its webhook post succeeds.
+every group, and a listing is only marked seen after its webhook post succeeds. A failed
+webhook stops the rest of its group, not the other groups, and the run exits non-zero.
 
 ## Development
 
@@ -100,6 +101,13 @@ If the state is ever lost, rebuild the baseline without posting:
 SEED_ONLY=1 CONFIG_FILE=... STATE_DIR=... olx-scraper
 ```
 
+## Migrating from cl-olx-scraper
+
+The config format and the `seen-urls.txt` format are unchanged. Point `CONFIG_FILE` and
+`STATE_DIR` at the existing files, or copy the state file into the new state directory.
+If the state cannot be carried over, run once with `SEED_ONLY=1` to record the current
+listings without posting them.
+
 ## License
 
-GPL-3.0-or-later. Ported from [cl-olx-scraper](https://github.com/carjorvaz/cl-olx-scraper).
+GPL-3.0. Ported from [cl-olx-scraper](https://github.com/carjorvaz/cl-olx-scraper).

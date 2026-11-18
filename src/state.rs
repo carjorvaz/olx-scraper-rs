@@ -43,8 +43,11 @@ pub fn save(state_dir: &Path, seen: &HashSet<String>) -> Result<()> {
 }
 
 fn write_and_rename(temp: &Path, path: &Path, seen: &HashSet<String>) -> Result<()> {
+    let mut urls: Vec<&String> = seen.iter().collect();
+    urls.sort();
+
     let mut file = File::create(temp)?;
-    for url in seen {
+    for url in urls {
         writeln!(file, "{url}")?;
     }
     file.sync_all()?;
@@ -92,6 +95,18 @@ mod tests {
         save(&dir, &HashSet::new()).unwrap();
 
         assert!(load(&dir).unwrap().is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn writes_urls_in_sorted_order() {
+        let dir = temp_dir("sorted");
+        let seen: HashSet<String> = ["b", "a", "c"].into_iter().map(str::to_owned).collect();
+
+        save(&dir, &seen).unwrap();
+
+        let text = fs::read_to_string(dir.join(FILE)).unwrap();
+        assert_eq!(text.lines().collect::<Vec<_>>(), ["a", "b", "c"]);
         fs::remove_dir_all(dir).unwrap();
     }
 

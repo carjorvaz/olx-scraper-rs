@@ -29,12 +29,18 @@
             doCheck = true;
             meta = {
               description = "OLX listing scraper with Discord notifications";
-              license = nixpkgs.lib.licenses.gpl3Plus;
+              license = nixpkgs.lib.licenses.gpl3Only;
               mainProgram = "olx-scraper";
             };
           };
         }
       );
+
+      checks = forAllSystems (system: {
+        default = self.packages.${system}.default;
+      });
+
+      formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt);
 
       devShells = forAllSystems (
         system:
@@ -46,6 +52,7 @@
             packages = with pkgs; [
               cargo
               clippy
+              just
               rust-analyzer
               rustc
               rustfmt
@@ -55,7 +62,12 @@
       );
 
       nixosModules.default =
-        { config, lib, pkgs, ... }:
+        {
+          config,
+          lib,
+          pkgs,
+          ...
+        }:
         let
           cfg = config.services.olx-scraper;
         in
@@ -104,6 +116,17 @@
                 StateDirectory = "olx-scraper";
                 LoadCredential = [ "config:${cfg.configFile}" ];
                 ExecStart = "${cfg.package}/bin/olx-scraper";
+
+                NoNewPrivileges = true;
+                PrivateTmp = true;
+                ProtectSystem = "strict";
+                ProtectHome = true;
+                ProtectKernelTunables = true;
+                ProtectKernelModules = true;
+                ProtectControlGroups = true;
+                RestrictSUIDSGID = true;
+                LockPersonality = true;
+                RestrictRealtime = true;
               };
 
               environment = {

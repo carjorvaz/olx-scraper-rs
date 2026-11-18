@@ -1,20 +1,25 @@
 //! Discord webhook payloads.
 
-use anyhow::{Context, Result};
+use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 
 use crate::olx::Listing;
 
 const USER_AGENT: &str = concat!("olx-scraper/", env!("CARGO_PKG_VERSION"));
 
+// Discord's limits for an embed title and a field value. A listing that
+// exceeds them would be rejected forever, so clip instead of aborting.
+const MAX_TITLE: usize = 256;
+const MAX_FIELD: usize = 1024;
+
 pub fn payload(listing: &Listing) -> Value {
     let mut embed = json!({
-        "title": &listing.title,
+        "title": clip(&listing.title, MAX_TITLE),
         "url": &listing.url,
         "fields": [
-            { "name": "Preço", "value": &listing.price },
-            { "name": "Localização", "value": &listing.location },
-            { "name": "Data", "value": &listing.date },
+            { "name": "Preço", "value": clip(&listing.price, MAX_FIELD) },
+            { "name": "Localização", "value": clip(&listing.location, MAX_FIELD) },
+            { "name": "Data", "value": clip(&listing.date, MAX_FIELD) },
         ],
     });
     if let Some(image_url) = &listing.image_url {
@@ -28,8 +33,30 @@ pub fn send(agent: &ureq::Agent, webhook: &str, listing: &Listing) -> Result<()>
         .post(webhook)
         .header("User-Agent", USER_AGENT)
         .send_json(payload(listing))
-        .context("posting to Discord")?;
+        .map_err(|error| {
+            anyhow!(
+                "posting to Discord: {}",
+                redact(&error.to_string(), webhook)
+            )
+        })?;
     Ok(())
+}
+
+fn clip(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let mut clipped: String = text.chars().take(max - 1).collect();
+    clipped.push('…');
+    clipped
+}
+
+/// The webhook URL contains a token; never let it reach the logs.
+fn redact(message: &str, webhook: &str) -> String {
+    match webhook.rsplit('/').next() {
+        Some(token) if !token.is_empty() => message.replace(token, "<token>"),
+        _ => message.to_owned(),
+    }
 }
 
 #[cfg(test)]
@@ -72,5 +99,26 @@ mod tests {
         let payload = payload(&listing);
 
         assert!(payload["embeds"][0].get("image").is_none());
+    }
+
+    #[test]
+    fn clips_long_text() {
+        let long = "x".repeat(300);
+        let clipped = clip(&long, MAX_TITLE);
+
+        assert_eq!(clipped.chars().count(), MAX_TITLE);
+        assert!(clipped.ends_with('…'));
+        assert_eq!(clip("short", MAX_TITLE), "short");
+    }
+
+    #[test]
+    fn redacts_the_webhook_token() {
+        let webhook = "https://discord.com/api/webhooks/1/s3cr3t";
+        let message = format!("bad uri: {webhook} is missing host");
+
+        let redacted = redact(&message, webhook);
+
+        assert!(redacted.contains("<token>"));
+        assert!(!redacted.contains("s3cr3t"));
     }
 }

@@ -1,4 +1,4 @@
-//! End-to-end test: a local HTTP server serves a fixture page and captures the
+//! End-to-end tests: a local HTTP server serves a fixture page and captures the
 //! webhook posts, so the whole binary runs without touching OLX or Discord.
 
 use std::fs;
@@ -16,7 +16,7 @@ struct Server {
     posts: Arc<Mutex<Vec<String>>>,
 }
 
-fn start_server() -> Server {
+fn start_server(post_status: u16) -> Server {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
     let port = listener.local_addr().expect("server addr").port();
     let posts = Arc::new(Mutex::new(Vec::new()));
@@ -25,14 +25,14 @@ fn start_server() -> Server {
     thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let captured = Arc::clone(&captured);
-            thread::spawn(move || handle(stream, &captured));
+            thread::spawn(move || handle(stream, &captured, post_status));
         }
     });
 
     Server { port, posts }
 }
 
-fn handle(mut stream: TcpStream, posts: &Mutex<Vec<String>>) {
+fn handle(mut stream: TcpStream, posts: &Mutex<Vec<String>>, post_status: u16) {
     let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
     let mut request = String::new();
     reader.read_line(&mut request).expect("request line");
@@ -57,7 +57,13 @@ fn handle(mut stream: TcpStream, posts: &Mutex<Vec<String>>) {
             .lock()
             .expect("posts lock")
             .push(String::from_utf8(body).expect("utf-8 body"));
-        let _ = stream.write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
+        let reason = match post_status {
+            204 => "No Content",
+            500 => "Internal Server Error",
+            _ => "Status",
+        };
+        let response = format!("HTTP/1.1 {post_status} {reason}\r\nConnection: close\r\n\r\n");
+        let _ = stream.write_all(response.as_bytes());
     } else {
         let head = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -83,19 +89,21 @@ fn temp_dir(name: &str) -> PathBuf {
     dir
 }
 
-#[test]
-fn scrapes_posts_and_dedupes_end_to_end() {
-    let server = start_server();
-    let dir = temp_dir("e2e");
+fn write_config(dir: &Path, port: u16) -> PathBuf {
     let config = dir.join("config");
     fs::write(
         &config,
-        format!(
-            "http://127.0.0.1:{}/webhook\nhttp://127.0.0.1:{}/search\n",
-            server.port, server.port
-        ),
+        format!("http://127.0.0.1:{port}/webhook\nhttp://127.0.0.1:{port}/search\n"),
     )
     .expect("write config");
+    config
+}
+
+#[test]
+fn scrapes_posts_and_dedupes_end_to_end() {
+    let server = start_server(204);
+    let dir = temp_dir("e2e");
+    let config = write_config(&dir, server.port);
     let state = dir.join("state");
 
     let first = run(&config, &state);
@@ -129,6 +137,57 @@ fn scrapes_posts_and_dedupes_end_to_end() {
     );
     assert!(stdout.contains("Sent 0 new listings total."), "{stdout}");
     assert_eq!(server.posts.lock().expect("posts lock").len(), 1);
+
+    fs::remove_dir_all(dir).expect("remove temp dir");
+}
+
+#[test]
+fn a_failed_post_exits_nonzero_and_leaves_the_listing_unseen() {
+    let server = start_server(500);
+    let dir = temp_dir("failed-post");
+    let config = write_config(&dir, server.port);
+    let state = dir.join("state");
+
+    let output = run(&config, &state);
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("http status: 500"), "{stderr}");
+    assert_eq!(server.posts.lock().expect("posts lock").len(), 1);
+
+    let seen = fs::read_to_string(state.join("seen-urls.txt")).expect("state file");
+    assert!(!seen.contains("hyndai-ioniq-eletrico-28kw"), "{seen}");
+
+    fs::remove_dir_all(dir).expect("remove temp dir");
+}
+
+#[test]
+fn a_failed_group_does_not_stop_the_next_group() {
+    let failing = start_server(500);
+    let working = start_server(204);
+    let dir = temp_dir("group-isolation");
+    let config = dir.join("config");
+    fs::write(
+        &config,
+        format!(
+            "http://127.0.0.1:{fail}/webhook\nhttp://127.0.0.1:{fail}/search\n\nhttp://127.0.0.1:{ok}/webhook\nhttp://127.0.0.1:{ok}/search\n",
+            fail = failing.port,
+            ok = working.port
+        ),
+    )
+    .expect("write config");
+    let state = dir.join("state");
+
+    let output = run(&config, &state);
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("http status: 500"), "{stderr}");
+    assert_eq!(failing.posts.lock().expect("posts lock").len(), 1);
+    assert_eq!(working.posts.lock().expect("posts lock").len(), 1);
+
+    let seen = fs::read_to_string(state.join("seen-urls.txt")).expect("state file");
+    assert!(seen.contains("hyndai-ioniq-eletrico-28kw"), "{seen}");
 
     fs::remove_dir_all(dir).expect("remove temp dir");
 }
