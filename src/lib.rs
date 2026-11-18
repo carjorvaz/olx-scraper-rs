@@ -13,6 +13,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
+const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+const POST_DELAY: Duration = Duration::from_secs(2);
+
 pub fn run() -> Result<()> {
     let config_file =
         env::var("CONFIG_FILE").context("CONFIG_FILE environment variable is required")?;
@@ -22,7 +25,7 @@ pub fn run() -> Result<()> {
     let groups = config::load(Path::new(&config_file))?;
     let mut seen = state::load(&state_dir)?;
     let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(30)))
+        .timeout_global(Some(HTTP_TIMEOUT))
         .build()
         .into();
 
@@ -58,7 +61,7 @@ pub fn run() -> Result<()> {
                             .context("saving state after a failed Discord send")?;
                         return Err(error);
                     }
-                    thread::sleep(Duration::from_secs(2));
+                    thread::sleep(POST_DELAY);
                 }
                 seen.insert(listing.url.clone());
                 total_new += 1;

@@ -71,14 +71,21 @@ https://www.olx.pt/imoveis/?search[order]=created_at:desc
 | `stateDir` | `"/var/lib/olx-scraper"` | Directory for the state file |
 | `package` | flake package | The package to run |
 
+## Design
+
+Small on purpose: blocking HTTP, no async runtime, a plain-text seen set, environment
+variables, and four runtime dependencies. The state file is written atomically after
+every group, and a listing is only marked seen after its webhook post succeeds.
+
 ## Development
 
 ```sh
 direnv allow      # or: nix develop
-cargo test
-cargo clippy --all-targets -- -D warnings
-cargo fmt --check
+just check        # fmt + clippy + tests
+just build        # Nix package, tests included
 ```
+
+The repository map for agents is in [AGENTS.md](AGENTS.md).
 
 ## State and recovery
 
