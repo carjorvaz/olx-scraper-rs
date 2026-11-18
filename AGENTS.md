@@ -51,11 +51,11 @@ a server and has no UI.
 
 ## Do not
 
-- Add a web UI. If one ever becomes necessary, it is server-rendered HTML (htmx if
+- No web UI. If one ever becomes necessary, it is server-rendered HTML (htmx if
   interactivity is needed), not a SPA and not a JavaScript build step.
-- Add a database or a config crate; plain text and environment variables are the design.
-- Change the state format without a migration.
-- Run tests against Discord; use a local server.
+- No database or config crate; plain text and environment variables are the design.
+- No state-format change without a migration.
+- No tests against Discord; use a local server.
 
 ## Sources
 
