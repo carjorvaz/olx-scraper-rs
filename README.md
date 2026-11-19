@@ -2,9 +2,10 @@
 
 A small OLX search scraper that posts new listings to Discord webhooks.
 
-This is a Rust port of [cl-olx-scraper](https://github.com/carjorvaz/cl-olx-scraper).
-It keeps the same config and state format, but saves the state file atomically
-and can rebuild a lost baseline without posting anything.
+This is the Rust implementation that replaces
+[cl-olx-scraper](https://github.com/carjorvaz/cl-olx-scraper), which is now archived.
+It keeps the same config and state format, but saves the state file atomically and can
+rebuild a lost baseline without posting anything.
 
 ## Usage
 
