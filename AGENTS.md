@@ -36,6 +36,9 @@ a server and has no UI.
 - A listing is marked seen only after its Discord POST succeeds, so a failed run retries
   it; a scrape error for one search URL does not abort the rest, and a failed webhook
   stops only its own group (the run exits non-zero).
+- The run exits non-zero if every search failed or if any page claimed results but
+  yielded no cards (selector drift). A 429 is retried after `Retry-After`, up to three
+  attempts; any other non-2xx response fails its group.
 - Discord payloads are clipped to Discord's limits; one oversized listing must not block
   the run.
 - One notification per URL per run, even when the same ad appears twice on a page.

@@ -1,5 +1,8 @@
 //! Discord webhook payloads.
 
+use std::thread;
+use std::time::Duration;
+
 use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 
@@ -11,6 +14,10 @@ const USER_AGENT: &str = concat!("olx-scraper/", env!("CARGO_PKG_VERSION"));
 // exceeds them would be rejected forever, so clip instead of aborting.
 const MAX_TITLE: usize = 256;
 const MAX_FIELD: usize = 1024;
+
+const MAX_ATTEMPTS: usize = 3;
+const RATE_LIMIT_FALLBACK: Duration = Duration::from_secs(5);
+const RATE_LIMIT_MARGIN: Duration = Duration::from_millis(500);
 
 pub fn payload(listing: &Listing) -> Value {
     let mut embed = json!({
@@ -29,17 +36,42 @@ pub fn payload(listing: &Listing) -> Value {
 }
 
 pub fn send(agent: &ureq::Agent, webhook: &str, listing: &Listing) -> Result<()> {
-    agent
-        .post(webhook)
-        .header("User-Agent", USER_AGENT)
-        .send_json(payload(listing))
-        .map_err(|error| {
-            anyhow!(
-                "posting to Discord: {}",
-                redact(&error.to_string(), webhook)
-            )
-        })?;
-    Ok(())
+    for attempt in 1..=MAX_ATTEMPTS {
+        let response = agent
+            .post(webhook)
+            .header("User-Agent", USER_AGENT)
+            .send_json(payload(listing))
+            .map_err(|error| {
+                anyhow!(
+                    "posting to Discord: {}",
+                    redact(&error.to_string(), webhook)
+                )
+            })?;
+
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+
+        let code = status.as_u16();
+        if code == 429 && attempt < MAX_ATTEMPTS {
+            let delay = response
+                .headers()
+                .get("retry-after")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<f64>().ok())
+                .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+                .map(|seconds| Duration::from_secs_f64(seconds.min(60.0)))
+                .unwrap_or(RATE_LIMIT_FALLBACK);
+            eprintln!("Discord rate limited; retrying in {delay:?}");
+            thread::sleep(delay + RATE_LIMIT_MARGIN);
+            continue;
+        }
+
+        return Err(anyhow!("posting to Discord: HTTP {code}"));
+    }
+
+    unreachable!("the loop returns on success, a non-429 error, or its last attempt")
 }
 
 fn clip(text: &str, max: usize) -> String {

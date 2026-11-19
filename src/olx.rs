@@ -1,6 +1,6 @@
 //! Fetching and parsing OLX search result pages.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use scraper::{ElementRef, Html, Selector};
 
 const BASE_URL: &str = "https://olx.pt";
@@ -16,34 +16,56 @@ pub struct Listing {
     pub image_url: Option<String>,
 }
 
-pub fn fetch(agent: &ureq::Agent, url: &str) -> Result<Vec<Listing>> {
-    let body = agent
+pub struct Page {
+    pub listings: Vec<Listing>,
+    pub drifted: bool,
+}
+
+pub fn fetch(agent: &ureq::Agent, url: &str) -> Result<Page> {
+    let mut response = agent
         .get(url)
         .header("User-Agent", USER_AGENT)
         .call()
-        .with_context(|| format!("requesting {url}"))?
+        .with_context(|| format!("requesting {url}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(anyhow!("HTTP {} from {url}", status.as_u16()));
+    }
+
+    let body = response
         .body_mut()
         .read_to_string()
         .with_context(|| format!("reading response from {url}"))?;
-
-    Ok(parse(&body))
+    Ok(parse_page(&body))
 }
 
-/// Parse a search result page. Pages that only have suggested results yield
-/// no listings.
+/// Extract every listing card from a page, for tests.
+#[cfg(test)]
 pub fn parse(html: &str) -> Vec<Listing> {
+    parse_page(html).listings
+}
+
+fn parse_page(html: &str) -> Page {
     let doc = Html::parse_document(html);
     if !has_results(&doc) {
         println!("    (only suggested listings, skipping)");
-        return Vec::new();
+        return Page {
+            listings: Vec::new(),
+            drifted: false,
+        };
     }
+
     let listings = extract(&doc);
     if listings.is_empty() {
         eprintln!(
             "Warning: the page reported results but no listing cards were parsed; the selectors may have changed"
         );
     }
-    listings
+    Page {
+        drifted: listings.is_empty(),
+        listings,
+    }
 }
 
 fn extract(doc: &Html) -> Vec<Listing> {

@@ -75,8 +75,12 @@ https://www.olx.pt/imoveis/?search[order]=created_at:desc
 
 Small on purpose: blocking HTTP, no async runtime, a plain-text seen set, environment
 variables, and four runtime dependencies. The state file is written atomically after
-every group, and a listing is only marked seen after its webhook post succeeds. A failed
-webhook stops the rest of its group, not the other groups, and the run exits non-zero.
+every group, and a listing is only marked seen after its webhook post succeeds.
+
+Failure handling is deliberately blunt: a scrape error logs and continues; a webhook
+failure stops the rest of its group, not the other groups, and the run exits non-zero; a
+Discord 429 is retried after `Retry-After`; and the run fails if every search failed or
+if a page reported results but yielded no cards (selector drift).
 
 ## Development
 

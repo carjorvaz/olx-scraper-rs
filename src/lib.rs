@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{Context, Error, Result};
+use anyhow::{Context, Error, Result, anyhow};
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 const POST_DELAY: Duration = Duration::from_secs(2);
@@ -26,6 +26,7 @@ pub fn run() -> Result<()> {
     let mut seen = state::load(&state_dir)?;
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(HTTP_TIMEOUT))
+        .http_status_as_error(false)
         .build()
         .into();
 
@@ -36,19 +37,27 @@ pub fn run() -> Result<()> {
 
     let mut total_new = 0;
     let mut first_error: Option<Error> = None;
+    let total_urls: usize = groups.iter().map(|group| group.urls.len()).sum();
+    let mut scrape_failures: usize = 0;
+    let mut drifted: usize = 0;
 
     for group in &groups {
         println!("\nProcessing group with {} search URLs", group.urls.len());
 
         'urls: for url in &group.urls {
             println!("  Scraping: {url}");
-            let listings = match olx::fetch(&agent, url) {
-                Ok(listings) => listings,
+            let page = match olx::fetch(&agent, url) {
+                Ok(page) => page,
                 Err(error) => {
+                    scrape_failures += 1;
                     eprintln!("Error scraping {url}: {error:#}");
                     continue;
                 }
             };
+            if page.drifted {
+                drifted += 1;
+            }
+            let listings = page.listings;
             let new = new_listings(&listings, &seen);
             println!("    Found {} listings, {} new", listings.len(), new.len());
 
@@ -74,6 +83,21 @@ pub fn run() -> Result<()> {
 
     if let Some(error) = first_error {
         return Err(error.context(format!("after sending {total_new} new listings")));
+    }
+
+    let mut problems = Vec::new();
+    if drifted > 0 {
+        problems.push(format!(
+            "{drifted} page(s) reported results but no cards; the selectors may have changed"
+        ));
+    }
+    if total_urls > 0 && scrape_failures == total_urls {
+        problems.push(format!(
+            "all searches failed ({scrape_failures}/{total_urls})"
+        ));
+    }
+    if !problems.is_empty() {
+        return Err(anyhow!("{}", problems.join("; ")));
     }
 
     let action = if seed_only {
